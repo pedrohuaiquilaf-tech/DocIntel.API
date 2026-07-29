@@ -4,7 +4,7 @@ import pytest
 from fastapi import status
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_upload_pdf_success(client):
     sample_pdf = Path(__file__).parent / "fixtures" / "sample.pdf"
     with sample_pdf.open("rb") as handle:
@@ -20,7 +20,7 @@ async def test_upload_pdf_success(client):
     assert "preview" in payload
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_upload_non_pdf_rejected(client):
     response = await client.post(
         "/api/documents/upload",

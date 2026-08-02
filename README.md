@@ -52,9 +52,8 @@ python -m pytest
 
 ## Future improvements
 
-- Implementar SSE para chat streaming
-- Agregar rutas de chat y persistencia de mensajes
-- Configurar migraciones Alembic reales
+- Expandir el contexto del LLM y mejorar el prompt grounding
+- Añadir más pruebas para casos de error de streaming y documentos sin texto
 - Crear frontend Vue 3
 
 ## License

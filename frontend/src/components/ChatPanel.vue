@@ -64,6 +64,12 @@ async function sendMessage() {
       const chunk = decoder.decode(value, { stream: true })
       const lines = chunk.split('\n').filter(Boolean)
       for (const line of lines) {
+        if (line.startsWith('event:')) {
+          const eventType = line.replace(/^event:\s*/, '').trim()
+          if (eventType === 'error') {
+            continue
+          }
+        }
         if (line.startsWith('data:')) {
           const payload = line.replace(/^data:\s*/, '')
           if (payload === '{}') {
@@ -73,6 +79,11 @@ async function sendMessage() {
             const parsed = JSON.parse(payload)
             if (parsed.delta) {
               assistantText += parsed.delta
+            }
+            if (parsed.message) {
+              error.value = parsed.message
+              isStreaming.value = false
+              return
             }
           } catch (e) {
             // ignore malformed fragments

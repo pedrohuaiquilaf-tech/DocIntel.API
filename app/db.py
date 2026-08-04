@@ -31,7 +31,13 @@ class GUID(TypeDecorator):
     def process_result_value(self, value: Any, dialect: Any) -> Any:
         if value is None:
             return value
-        return uuid.UUID(value)
+        if isinstance(value, uuid.UUID):
+            return value
+        if hasattr(value, "hex") and hasattr(value, "version"):
+            return uuid.UUID(str(value))
+        if isinstance(value, str):
+            return uuid.UUID(value)
+        return uuid.UUID(str(value))
 
 
 engine: Any = None

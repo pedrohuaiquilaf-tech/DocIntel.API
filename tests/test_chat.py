@@ -54,13 +54,15 @@ async def test_stream_chat_message_persists_history(client, async_session, monke
     await async_session.commit()
     await async_session.refresh(session)
 
-    async def fake_streaming_reply(*, system_prompt: str, document_text: str, user_message: str):
+    async def fake_streaming_reply(*, system_prompt: str, document_text: str, user_message: str, api_key: str):
+        assert api_key == "fake-key"
         yield "Hola"
         yield " desde el mock"
 
     import app.routes.chat as chat_routes
 
     monkeypatch.setattr(chat_routes, "generate_streamed_chat_reply", fake_streaming_reply)
+    monkeypatch.setattr(chat_routes.settings, "openai_api_key", "fake-key")
 
     response = await client.post(
         f"/api/chat/sessions/{session.id}/messages",
@@ -79,3 +81,29 @@ async def test_stream_chat_message_persists_history(client, async_session, monke
     assert persisted_messages[0].role == "user"
     assert persisted_messages[1].role == "assistant"
     assert persisted_messages[1].content == "Hola desde el mock"
+
+
+@pytest.mark.anyio
+async def test_chat_message_returns_clear_error_without_openai_key(client, async_session, monkeypatch):
+    document = Document(filename="sample.pdf", content_text="Contenido de prueba del documento", page_count=1)
+    async_session.add(document)
+    await async_session.commit()
+    await async_session.refresh(document)
+
+    session = ChatSession(document_id=document.id)
+    async_session.add(session)
+    await async_session.commit()
+    await async_session.refresh(session)
+
+    import app.routes.chat as chat_routes
+
+    monkeypatch.setattr(chat_routes.settings, "openai_api_key", None)
+
+    response = await client.post(
+        f"/api/chat/sessions/{session.id}/messages",
+        json={"content": "¿Qué dice el documento?"},
+    )
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    payload = response.json()
+    assert payload["detail"] == "OpenAI API key is required to generate chat responses."

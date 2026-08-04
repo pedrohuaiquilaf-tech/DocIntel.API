@@ -35,6 +35,9 @@ testing = [
 [project.urls]
 Homepage = "https://github.com/pedrohuaiquilaf-tech/DocIntel.API"
 
+[tool.setuptools]
+packages = ["app"]
+
 [build-system]
 requires = ["setuptools>=65.0", "wheel"]
 build-backend = "setuptools.build_meta"

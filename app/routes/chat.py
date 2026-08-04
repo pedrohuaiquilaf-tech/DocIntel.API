@@ -9,6 +9,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.db import get_session
 from app.models import ChatMessage, ChatSession, Document
 from app.schemas import ChatCreateSessionRequest, ChatCreateMessageRequest, ChatMessageResponse, ChatSessionResponse
@@ -16,20 +17,27 @@ from app.schemas import ChatCreateSessionRequest, ChatCreateMessageRequest, Chat
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 
-async def generate_streamed_chat_reply(*, system_prompt: str, document_text: str, user_message: str) -> AsyncIterator[str]:
+async def generate_streamed_chat_reply(*, system_prompt: str, document_text: str, user_message: str, api_key: str) -> AsyncIterator[str]:
+    if not api_key:
+        raise RuntimeError("OpenAI API key is required for chat streaming.")
+
     try:
         from openai import AsyncOpenAI
     except Exception as exc:  # pragma: no cover - fallback for missing dependency
         raise RuntimeError("OpenAI client is not available") from exc
 
-    client = AsyncOpenAI(api_key="")
+    client = AsyncOpenAI(api_key=api_key)
     # The implementation is intentionally lightweight here; tests monkeypatch this helper.
     prompt = f"{system_prompt}\n\nDocumento:\n{document_text[:12000]}\n\nUsuario: {user_message}"
-    response = await client.responses.create(
-        model="gpt-4o-mini",
-        input=prompt,
-        stream=True,
-    )
+    try:
+        response = await client.responses.create(
+            model="gpt-4o-mini",
+            input=prompt,
+            stream=True,
+        )
+    except Exception as exc:
+        raise RuntimeError("OpenAI request failed") from exc
+
     async for event in response:
         if getattr(event, "type", None) == "response.output_text.delta":
             delta = getattr(event, "delta", "")
@@ -60,6 +68,12 @@ async def create_chat_message(session_id: UUID, payload: ChatCreateMessageReques
     if document is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Documento no encontrado")
 
+    if not settings.openai_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="OpenAI API key is required to generate chat responses.",
+        )
+
     user_message = ChatMessage(session_id=chat_session.id, role="user", content=payload.content)
     request_session.add(user_message)
     await request_session.commit()
@@ -72,14 +86,20 @@ async def create_chat_message(session_id: UUID, payload: ChatCreateMessageReques
 
     async def event_stream() -> AsyncIterator[str]:
         chunks: list[str] = []
-        async for chunk in generate_streamed_chat_reply(
-            system_prompt=system_prompt,
-            document_text=document.content_text,
-            user_message=payload.content,
-        ):
-            chunks.append(chunk)
-            payload_chunk = json.dumps({"delta": chunk})
-            yield f"data: {payload_chunk}\n\n"
+        try:
+            async for chunk in generate_streamed_chat_reply(
+                system_prompt=system_prompt,
+                document_text=document.content_text,
+                user_message=payload.content,
+                api_key=settings.openai_api_key,
+            ):
+                chunks.append(chunk)
+                payload_chunk = json.dumps({"delta": chunk})
+                yield f"data: {payload_chunk}\n\n"
+        except Exception as exc:
+            error_payload = json.dumps({"message": str(exc)})
+            yield f"event: error\ndata: {error_payload}\n\n"
+            return
 
         yield "event: done\ndata: {}\n\n"
         assistant_message = ChatMessage(session_id=chat_session.id, role="assistant", content="".join(chunks))
